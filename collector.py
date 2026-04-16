@@ -1,62 +1,71 @@
 import os
 import requests
-import base64
 
 def run():
+    # Odstránenie bielych znakov
     cid = os.getenv("NETATMO_CLIENT_ID", "").strip()
     csc = os.getenv("NETATMO_CLIENT_SECRET", "").strip()
     rtk = os.getenv("NETATMO_REFRESH_TOKEN", "").strip()
 
-    # 1. Príprava autentifikácie cez Basic Auth hlavičku
-    auth_str = f"{cid}:{csc}"
-    auth_b64 = base64.b64encode(auth_str.encode()).decode()
+    auth_url = "https://netatmo.com"
     
-    headers = {
-        "Authorization": f"Basic {auth_b64}",
-        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
-    }
-    
+    # Payload so všetkými údajmi, ako to robí oficiálny generátor
     payload = {
         "grant_type": "refresh_token",
-        "refresh_token": rtk
+        "refresh_token": rtk,
+        "client_id": cid,
+        "client_secret": csc
     }
 
     try:
-        print(f"DEBUG: Skúšam Basic Auth s ID: {cid[:5]}...")
-        r = requests.post("https://netatmo.com", data=payload, headers=headers)
+        print(f"DEBUG: Pokus o autentifikáciu pre ID: {cid[:6]}...")
+        
+        # Explicitne bez špeciálnych hlavičiek, len čistý POST
+        r = requests.post(auth_url, data=payload, timeout=15)
         
         print(f"Auth Status: {r.status_code}")
-        
-        # Ak vráti JSON, máme vyhraté
-        if r.status_code == 200 and not r.text.strip().startswith("<!DOCTYPE"):
-            token_data = r.json()
-            access_token = token_data.get("access_token")
-            print("ÚSPECH: Token získaný!")
 
-            # 2. Získanie dát
-            d = requests.get("https://netatmo.com", 
-                             headers={"Authorization": f"Bearer {access_token}"})
+        # Ak dostaneme HTML, vypíšeme diagnostiku
+        if r.text.strip().startswith("<!DOCTYPE"):
+            print("CHYBA: Netatmo stále vracia HTML login stránku.")
+            print(f"Dĺžka prijatej odpovede: {len(r.text)} znakov")
+            return
+
+        # Ak dostaneme JSON
+        token_data = r.json()
+        if "access_token" not in token_data:
+            print(f"CHYBA: JSON neobsahuje access_token. Odpoveď: {token_data}")
+            return
+
+        print("ÚSPECH: Access Token získaný.")
+        access_token = token_data.get("access_token")
+
+        # 2. Získanie dát zo stanice
+        d = requests.get("https://netatmo.com", 
+                         headers={"Authorization": f"Bearer {access_token}"},
+                         timeout=15)
+        
+        if d.status_code == 200:
+            full_payload = d.json().get("body", {})
+            print("Dáta zo stanice stiahnuté.")
+
+            # 3. Zápis do Supabase
+            supa_url = f"{os.getenv('SUPABASE_URL')}/rest/v1/netatmo_raw"
+            supa_headers = {
+                "apikey": os.getenv("SUPABASE_KEY"),
+                "Authorization": f"Bearer {os.getenv('SUPABASE_KEY')}",
+                "Content-Type": "application/json",
+                "Prefer": "return=minimal"
+            }
             
-            if d.status_code == 200:
-                full_payload = d.json().get("body", {})
-                
-                # 3. Zápis do Supabase
-                supa_url = f"{os.getenv('SUPABASE_URL')}/rest/v1/netatmo_raw"
-                supa_headers = {
-                    "apikey": os.getenv("SUPABASE_KEY"),
-                    "Authorization": f"Bearer {os.getenv('SUPABASE_KEY')}",
-                    "Content-Type": "application/json"
-                }
-                res = requests.post(supa_url, json={"raw_data": full_payload}, headers=supa_headers)
-                if res.status_code < 300:
-                    print("VŠETKO OK: Dáta sú v Supabase!")
-                else:
-                    print(f"Supabase Error: {res.text}")
+            res = requests.post(supa_url, json={"raw_data": full_payload}, headers=supa_headers)
+            
+            if res.status_code < 300:
+                print("VŠETKO OK: Dáta sú úspešne uložené v Supabase!")
             else:
-                print(f"Data Error: {d.text}")
+                print(f"Supabase Error ({res.status_code}): {res.text}")
         else:
-            print(f"Odpoveď (prvých 100 znakov): {r.text[:100]}")
-            print("CHYBA: Stále HTML alebo iná chyba.")
+            print(f"Chyba pri sťahovaní dát ({d.status_code}): {d.text}")
                 
     except Exception as e:
         print(f"Systémová chyba: {e}")
