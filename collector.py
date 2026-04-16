@@ -11,73 +11,34 @@ def run():
             "client_id": os.getenv("NETATMO_CLIENT_ID"),
             "client_secret": os.getenv("NETATMO_CLIENT_SECRET"),
         }
-        
         auth_resp = requests.post(auth_url, data=auth_data)
-        if auth_resp.status_code != 200:
-            print(f"Chyba autentifikácie: {auth_resp.text}")
-            return
-            
-        access_token = auth_resp.json().get("access_token")
+        auth_resp.raise_for_status()
+        token = auth_resp.json().get("access_token")
 
-        # 2. Získanie dát
+        # 2. Stiahnutie kompletnej stanice bez filtrov
         api_url = "https://netatmo.com"
-        headers = {"Authorization": f"Bearer {access_token}"}
-        resp = requests.get(api_url, headers=headers)
+        headers = {"Authorization": f"Bearer {token}"}
+        data_resp = requests.get(api_url, headers=headers)
+        data_resp.raise_for_status()
         
-        if resp.status_code != 200:
-            print(f"Chyba Netatmo API: {resp.text}")
-            return
-            
-        devices = resp.json().get("body", {}).get("devices", [])
+        # Celý JSON objekt z 'body'
+        full_payload = data_resp.json().get("body", {})
 
-        # Mapovanie: MAC -> (Veličina, Jednotka)
-        targets = {
-            "05:00:00:0a:f9:4a": ("sum_rain_24", "mm"),
-            "06:00:00:07:0f:ee": ("GustStrength", "km/h"),
-            "70:ee:50:73:e6:1e": ("Temperature", "°C"),
-            "02:00:00:73:d1:2e": ("Temperature", "°C"),
-            "03:00:00:0d:87:4c": ("Temperature", "°C"),
-            "02:00:00:20:f7:70": ("Temperature", "°C")
+        # 3. Zápis do Supabase
+        supa_url = f"{os.getenv('SUPABASE_URL')}/rest/v1/netatmo_raw"
+        supa_headers = {
+            "apikey": os.getenv("SUPABASE_KEY"),
+            "Authorization": f"Bearer {os.getenv('SUPABASE_KEY')}",
+            "Content-Type": "application/json"
         }
-
-        measurements = []
-
-        for d in devices:
-            # Hlavná stanica
-            m_id = d.get("_id")
-            if m_id in targets:
-                data_type, unit = targets[m_id]
-                val = d.get("dashboard_data", {}).get(data_type)
-                if val is not None:
-                    measurements.append({"module_id": m_id, "data_type": data_type, "value": float(val), "unit": unit})
-            
-            # Ostatné moduly
-            for m in d.get("modules", []):
-                m_id = m.get("_id")
-                if m_id in targets:
-                    data_type, unit = targets[m_id]
-                    val = m.get("dashboard_data", {}).get(data_type)
-                    if val is not None:
-                        measurements.append({"module_id": m_id, "data_type": data_type, "value": float(val), "unit": unit})
-
-        # 3. Uloženie do Supabase
-        if measurements:
-            supa_url = f"{os.getenv('SUPABASE_URL')}/rest/v1/netatmo_measurements"
-            supa_headers = {
-                "apikey": os.getenv("SUPABASE_KEY"),
-                "Authorization": f"Bearer {os.getenv('SUPABASE_KEY')}",
-                "Content-Type": "application/json"
-            }
-            res = requests.post(supa_url, json=measurements, headers=supa_headers)
-            if res.status_code >= 300:
-                print(f"Chyba Supabase: {res.text}")
-            else:
-                print(f"Úspešne uložené: {len(measurements)} hodnôt.")
-        else:
-            print("Neboli nájdené žiadne nové dáta pre definované moduly.")
+        # Uložíme celý JSON do stĺpca raw_data
+        res = requests.post(supa_url, json={"raw_data": full_payload}, headers=supa_headers)
+        res.raise_for_status()
+        
+        print("Kompletné dáta úspešne archivované.")
 
     except Exception as e:
-        print(f"Chyba v skripte: {str(e)}")
+        print(f"Chyba pri zbere: {e}")
 
 if __name__ == "__main__":
     run()
