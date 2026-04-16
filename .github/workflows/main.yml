@@ -1,0 +1,23 @@
+name: Netatmo Sync
+on:
+  schedule:
+    - cron: '*/2 * * * *' # Každých 2 minút
+  workflow_dispatch: # Tlačidlo pre manuálne spustenie
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      - name: Install Dependencies
+        run: pip install requests
+      - name: Run Script
+        env:
+          X_NAWS_KEY: ${{ secrets.X_NAWS_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python collector.py
