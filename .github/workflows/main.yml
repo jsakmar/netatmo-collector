@@ -1,21 +1,29 @@
 name: Netatmo Sync
+
 on:
   schedule:
-    - cron: '*/2 * * * *' # Každých 2 minút
-  workflow_dispatch: # Tlačidlo pre manuálne spustenie
+    - cron: '*/5 * * * *'   # každých 5 min (spoľahlivé)
+  workflow_dispatch:
 
 jobs:
-  build:
+  sync:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4  # Aktualizované z v3
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
       - name: Setup Python
-        uses: actions/setup-python@v5  # Aktualizované z v4
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.9'
-      - name: Install Dependencies
-        run: pip install requests
-      - name: Run Script
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install requests
+
+      - name: Run collector
         env:
           NETATMO_CLIENT_ID: ${{ secrets.NETATMO_CLIENT_ID }}
           NETATMO_CLIENT_SECRET: ${{ secrets.NETATMO_CLIENT_SECRET }}
@@ -23,4 +31,3 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: python collector.py
-
