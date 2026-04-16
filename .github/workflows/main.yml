@@ -17,7 +17,9 @@ jobs:
         run: pip install requests
       - name: Run Script
         env:
-          X_NAWS_KEY: ${{ secrets.X_NAWS_KEY }}
+          NETATMO_CLIENT_ID: ${{ secrets.NETATMO_CLIENT_ID }}
+          NETATMO_CLIENT_SECRET: ${{ secrets.NETATMO_CLIENT_SECRET }}
+          NETATMO_REFRESH_TOKEN: ${{ secrets.NETATMO_REFRESH_TOKEN }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: python collector.py
