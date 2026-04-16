@@ -61,6 +61,7 @@ def run():
             )
 
             print(f"Supabase: {res.status_code}")
+            print("SUPABASE_URL:", os.getenv("SUPABASE_URL"))
 
         else:
             print(f"Chyba dát: {d.text}")
