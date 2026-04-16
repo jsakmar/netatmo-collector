@@ -2,8 +2,12 @@ import os
 import requests
 
 # Konfigurácia z tvojich údajov
-URL = "http://huty96.eu"
-HEADERS = {"X-NAWS-Key": os.getenv("X_NAWS_KEY")}
+URL = "https://huty96.eu"
+HEADERS = {
+    "X-NAWS-Key": os.getenv("X_NAWS_KEY"),
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+}
+
 
 def run():
     try:
