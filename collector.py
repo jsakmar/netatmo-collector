@@ -1,28 +1,27 @@
 import os
 import requests
+import urllib3
 
-# Konfigurácia z tvojich údajov
+# Potlačenie varovaní o nezabezpečenom HTTPS (keďže vypíname overovanie)
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# Skúsime verziu s www, ktorá máva častejšie platný certifikát
 URL = "https://huty96.eu"
 HEADERS = {
     "X-NAWS-Key": os.getenv("X_NAWS_KEY"),
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 }
 
-
 def run():
     try:
-        # 1. Volanie tvojho API na Wordpresse
-        resp = requests.get(URL, headers=HEADERS)
+        # 1. Volanie tvojho API (verify=False ignoruje chybu certifikátu)
+        resp = requests.get(URL, headers=HEADERS, verify=False, timeout=15)
         resp.raise_for_status()
         data = resp.json()
 
-        # 2. Príprava dát pre Supabase
         measurements = []
-        
-        # Plugin zvyčajne vráti zoznam modulov v 'body' -> 'devices'
         devices = data.get("body", {}).get("devices", [])
         
-        # Definícia tvojich modulov
         targets = {
             "05:00:00:0a:f9:4a": ("sum_rain_24", "mm"),
             "06:00:00:07:0f:ee": ("GustStrength", "km/h"),
@@ -35,7 +34,6 @@ def run():
         for d in devices:
             m_id = d.get("_id")
             dash = d.get("dashboard_data", {})
-            
             if m_id in targets:
                 data_type, unit = targets[m_id]
                 val = dash.get(data_type)
@@ -47,7 +45,7 @@ def run():
                         "unit": unit
                     })
 
-        # 3. Odoslanie do Supabase
+        # 2. Odoslanie do Supabase
         if measurements:
             supa_url = f"{os.getenv('SUPABASE_URL')}/rest/v1/netatmo_measurements"
             supa_headers = {
@@ -57,12 +55,12 @@ def run():
             }
             res = requests.post(supa_url, json=measurements, headers=supa_headers)
             res.raise_for_status()
-            print(f"Úspešne uložených {len(measurements)} hodnôt.")
+            print(f"Uložené: {len(measurements)} hodnôt.")
         else:
-            print("V API sa nenašli žiadne dáta pre tvoje moduly.")
+            print("V API sa nenašli žiadne dáta pre definované moduly.")
             
     except Exception as e:
-        print(f"Nastala chyba: {e}")
+        print(f"Chyba: {e}")
 
 if __name__ == "__main__":
     run()
