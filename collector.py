@@ -1,27 +1,36 @@
 import os
 import requests
-import urllib3
-
-# Potlačenie varovaní o nezabezpečenom HTTPS (keďže vypíname overovanie)
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-# Skúsime verziu s www, ktorá máva častejšie platný certifikát
-URL = "https://huty96.eu"
-HEADERS = {
-    "X-NAWS-Key": os.getenv("X_NAWS_KEY"),
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-}
 
 def run():
     try:
-        # 1. Volanie tvojho API (verify=False ignoruje chybu certifikátu)
-        resp = requests.get(URL, headers=HEADERS, verify=False, timeout=15)
-        resp.raise_for_status()
-        data = resp.json()
-
-        measurements = []
-        devices = data.get("body", {}).get("devices", [])
+        # 1. Získanie Access Tokenu
+        auth_url = "https://netatmo.com"
+        auth_data = {
+            "grant_type": "refresh_token",
+            "refresh_token": os.getenv("NETATMO_REFRESH_TOKEN"),
+            "client_id": os.getenv("NETATMO_CLIENT_ID"),
+            "client_secret": os.getenv("NETATMO_CLIENT_SECRET"),
+        }
         
+        auth_resp = requests.post(auth_url, data=auth_data)
+        if auth_resp.status_code != 200:
+            print(f"Chyba autentifikácie: {auth_resp.text}")
+            return
+            
+        access_token = auth_resp.json().get("access_token")
+
+        # 2. Získanie dát
+        api_url = "https://netatmo.com"
+        headers = {"Authorization": f"Bearer {access_token}"}
+        resp = requests.get(api_url, headers=headers)
+        
+        if resp.status_code != 200:
+            print(f"Chyba Netatmo API: {resp.text}")
+            return
+            
+        devices = resp.json().get("body", {}).get("devices", [])
+
+        # Mapovanie: MAC -> (Veličina, Jednotka)
         targets = {
             "05:00:00:0a:f9:4a": ("sum_rain_24", "mm"),
             "06:00:00:07:0f:ee": ("GustStrength", "km/h"),
@@ -31,21 +40,27 @@ def run():
             "02:00:00:20:f7:70": ("Temperature", "°C")
         }
 
+        measurements = []
+
         for d in devices:
+            # Hlavná stanica
             m_id = d.get("_id")
-            dash = d.get("dashboard_data", {})
             if m_id in targets:
                 data_type, unit = targets[m_id]
-                val = dash.get(data_type)
+                val = d.get("dashboard_data", {}).get(data_type)
                 if val is not None:
-                    measurements.append({
-                        "module_id": m_id,
-                        "data_type": data_type,
-                        "value": float(val),
-                        "unit": unit
-                    })
+                    measurements.append({"module_id": m_id, "data_type": data_type, "value": float(val), "unit": unit})
+            
+            # Ostatné moduly
+            for m in d.get("modules", []):
+                m_id = m.get("_id")
+                if m_id in targets:
+                    data_type, unit = targets[m_id]
+                    val = m.get("dashboard_data", {}).get(data_type)
+                    if val is not None:
+                        measurements.append({"module_id": m_id, "data_type": data_type, "value": float(val), "unit": unit})
 
-        # 2. Odoslanie do Supabase
+        # 3. Uloženie do Supabase
         if measurements:
             supa_url = f"{os.getenv('SUPABASE_URL')}/rest/v1/netatmo_measurements"
             supa_headers = {
@@ -54,13 +69,15 @@ def run():
                 "Content-Type": "application/json"
             }
             res = requests.post(supa_url, json=measurements, headers=supa_headers)
-            res.raise_for_status()
-            print(f"Uložené: {len(measurements)} hodnôt.")
+            if res.status_code >= 300:
+                print(f"Chyba Supabase: {res.text}")
+            else:
+                print(f"Úspešne uložené: {len(measurements)} hodnôt.")
         else:
-            print("V API sa nenašli žiadne dáta pre definované moduly.")
-            
+            print("Neboli nájdené žiadne nové dáta pre definované moduly.")
+
     except Exception as e:
-        print(f"Chyba: {e}")
+        print(f"Chyba v skripte: {str(e)}")
 
 if __name__ == "__main__":
     run()
